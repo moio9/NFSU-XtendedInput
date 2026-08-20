@@ -1,0 +1,51 @@
+name: Build U2 Real Rumble
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/u2-real-rumble
+    paths:
+      - 'NFSU2RealRumble.hpp'
+      - 'NFSU2_Addresses.h'
+      - 'dllmain.cpp'
+      - 'NFSU_XtendedInput.vcxproj'
+      - '.github/workflows/build-u2-real-rumble.yml'
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build-u2:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release-UG2 Win32
+        shell: cmd
+        run: >-
+          msbuild NFSU_XtendedInput.vcxproj /m
+          /p:Configuration=Release-UG2
+          /p:Platform=Win32
+          /p:PostBuildEventUseInBuild=false
+
+      - name: Locate ASI
+        id: locate
+        shell: pwsh
+        run: |
+          $asi = Get-ChildItem -Path . -Recurse -Filter 'NFSU_XtendedInput.asi' | Select-Object -First 1
+          if (!$asi) { throw 'NFSU_XtendedInput.asi was not produced.' }
+          Write-Host "ASI: $($asi.FullName)"
+          Write-Host "Size: $($asi.Length)"
+          "path=$($asi.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload U2 ASI
+        uses: actions/upload-artifact@v4
+        with:
+          name: NFSU-XtendedInput-U2-RealRumble
+          path: ${{ steps.locate.outputs.path }}
+          if-no-files-found: error
