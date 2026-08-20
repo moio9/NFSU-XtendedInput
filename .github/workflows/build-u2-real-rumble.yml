@@ -49,3 +49,5 @@ jobs:
           name: NFSU-XtendedInput-U2-RealRumble
           path: ${{ steps.locate.outputs.path }}
           if-no-files-found: error
+
+# Push-trigger validation for the UG2 branch.
