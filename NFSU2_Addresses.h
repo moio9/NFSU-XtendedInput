@@ -45,3 +45,9 @@ unsigned int LastControlledDeviceOldState = 0;
 #define REALDRIVER_STEER_OFFSET 0x2C8 
 
 #define DISABLE_WHEEL_ADDR 0x005D2C83
+
+// Ensure XInput state is refreshed immediately before RealDriver gameplay input.
+#include "NFSU2GameplayInputFix.hpp"
+
+// Native SPEED2 force-feedback generation translated to XInput dual-motor rumble.
+#include "NFSU2RealRumble.hpp"

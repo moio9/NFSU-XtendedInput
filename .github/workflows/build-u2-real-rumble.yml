@@ -1,0 +1,116 @@
+name: Build U2 Real Rumble
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/u2-real-rumble
+    paths:
+      - 'NFSU2RealRumble.hpp'
+      - 'NFSU2_Addresses.h'
+      - 'dllmain.cpp'
+      - 'NFSU_XtendedInput.vcxproj'
+      - '.github/workflows/build-u2-real-rumble.yml'
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build-u2:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Detect installed Windows SDK
+        shell: pwsh
+        run: |
+          $sdkRoot = 'C:\Program Files (x86)\Windows Kits\10\Lib'
+          $sdk = Get-ChildItem $sdkRoot -Directory |
+            Where-Object { $_.Name -match '^10\.0\.\d+\.\d+$' } |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1
+          if (!$sdk) { throw 'No Windows 10 SDK found on runner.' }
+          Write-Host "Using Windows SDK $($sdk.Name)"
+          "WINDOWS_SDK_VERSION=$($sdk.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build Release-UG2 Win32
+        shell: cmd
+        run: >-
+          msbuild NFSU_XtendedInput.vcxproj /m
+          /p:Configuration=Release-UG2
+          /p:Platform=Win32
+          /p:WindowsTargetPlatformVersion=%WINDOWS_SDK_VERSION%
+          /p:PostBuildEventUseInBuild=false
+
+      - name: Locate ASI
+        id: locate
+        shell: pwsh
+        run: |
+          $asi = Get-ChildItem -Path . -Recurse -Filter 'NFSU_XtendedInput.asi' | Select-Object -First 1
+          if (!$asi) { throw 'NFSU_XtendedInput.asi was not produced.' }
+          Write-Host "ASI: $($asi.FullName)"
+          Write-Host "Size: $($asi.Length)"
+          "path=$($asi.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build full U2 package
+        shell: pwsh
+        run: |
+          $root = Join-Path $PWD 'package'
+          $scripts = Join-Path $root 'scripts'
+          New-Item -ItemType Directory -Force -Path $scripts | Out-Null
+
+          Copy-Item '${{ steps.locate.outputs.path }}' (Join-Path $scripts 'NFSU_XtendedInput.asi')
+
+          # The upstream UG2 INI contains one accidental merge-marker line at the top.
+          # Strip conflict-marker lines while preserving the actual configuration.
+          Get-Content 'Config-UG2/NFSU_XtendedInput.ini' |
+            Where-Object { $_ -notmatch '^(<<<<<<<|=======|>>>>>>>)' } |
+            Set-Content -Encoding utf8 (Join-Path $scripts 'NFSU_XtendedInput.ini')
+
+          Copy-Item 'Config-UG2/EventReference.txt' (Join-Path $root 'EventReference.txt')
+          Copy-Item 'README.md' (Join-Path $root 'README.md')
+          Copy-Item 'LICENSE' (Join-Path $root 'LICENSE')
+
+          @'
+          NFS Underground 2 - XtendedInput Real Rumble
+
+          Install:
+          Extract this package into the main Need for Speed Underground 2 folder.
+          The scripts folder must end up inside the game folder.
+
+          This build keeps XtendedInput's XInput input path and translates the
+          game's native Underground 2 force-feedback calculations to XInput rumble.
+
+          Runtime diagnostic log:
+          NFSU_XtendedInput_Rumble_U2.log
+          '@ | Set-Content -Encoding utf8 (Join-Path $root 'REAL_RUMBLE_README.txt')
+
+      - name: Verify full package
+        shell: pwsh
+        run: |
+          $required = @(
+            'package/scripts/NFSU_XtendedInput.asi',
+            'package/scripts/NFSU_XtendedInput.ini',
+            'package/EventReference.txt',
+            'package/README.md',
+            'package/LICENSE',
+            'package/REAL_RUMBLE_README.txt'
+          )
+          foreach ($file in $required) {
+            if (!(Test-Path $file)) { throw "Missing package file: $file" }
+          }
+          if (Select-String -Path 'package/scripts/NFSU_XtendedInput.ini' -Pattern '^(<<<<<<<|=======|>>>>>>>)') {
+            throw 'Merge-conflict markers remain in packaged INI.'
+          }
+          Get-ChildItem -Recurse package | Select-Object FullName, Length
+
+      - name: Upload full U2 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: NFSU2-XtendedInput-RealRumble-Full-Package
+          path: package/**
+          if-no-files-found: error
